@@ -3,8 +3,10 @@ name: Nova-Print APK bauen
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, master]
+    paths:
+      - 'Nova-Print-*-Quellcode.zip'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Repository herunterladen
+      - name: Repository laden
         uses: actions/checkout@v4
 
       - name: Java 17 einrichten
@@ -26,59 +28,62 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK vorbereiten
-        shell: bash
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -name sdkmanager -type f | head -n 1)
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "Android SDK Manager nicht gefunden!"
-            exit 1
-          fi
-
-          yes | "$SDKMANAGER" --licenses || true
-
       - name: Gradle 8.9 einrichten
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Projekt-ZIP entpacken
+      - name: Android SDK vorbereiten
         shell: bash
         run: |
-          mkdir -p extracted
-
-          unzip -q Nova-Print-0.1-Quellcode.zip \
-            -d extracted
-
-          PROJECT=$(find extracted -type f \
-            -name settings.gradle.kts -print -quit)
-
-          if [ -z "$PROJECT" ]; then
-            echo "Android-Projekt nicht gefunden!"
+          set -euo pipefail
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)
+          if [ -z "$SDKMANAGER" ]; then
+            echo 'Kein Android SDK Manager vorhanden.' >&2
             exit 1
           fi
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
 
-          PROJECT_DIR=$(dirname "$PROJECT")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Projekt gefunden: $PROJECT_DIR"
-
-      - name: Android APK bauen
+      - name: Neueste Nova-Print-ZIP finden und entpacken
+        id: project
         shell: bash
         run: |
-          cd "$PROJECT_DIR"
-          gradle :app:assembleDebug \
-            --no-daemon --stacktrace
+          set -euo pipefail
+          mapfile -t ZIPS < <(find . -maxdepth 1 -type f -name 'Nova-Print-*-Quellcode.zip' -printf '%f\n' | sort -V)
+          if [ "${#ZIPS[@]}" -eq 0 ]; then
+            echo 'Keine Nova-Print-*-Quellcode.zip im Hauptverzeichnis gefunden.' >&2
+            exit 1
+          fi
+          ZIP="${ZIPS[$((${#ZIPS[@]} - 1))]}"
+          VERSION="${ZIP#Nova-Print-}"
+          VERSION="${VERSION%-Quellcode.zip}"
+          echo "Ausgewählt: $ZIP (Version $VERSION)"
+          mkdir -p extracted
+          unzip -q "$ZIP" -d extracted
+          PROJECT=$(find extracted -type f -name settings.gradle.kts -print -quit)
+          if [ -z "$PROJECT" ]; then
+            echo 'settings.gradle.kts in ZIP nicht gefunden.' >&2
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$PROJECT")
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo 'app/build.gradle.kts fehlt im Projekt.' >&2
+            exit 1
+          fi
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: APK bauen
+        shell: bash
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
         with:
-          name: Nova-Print-APK
-          path: extracted/**/build/outputs/apk/debug/*.apk
+          name: Nova-Print-${{ steps.project.outputs.version }}-APK
+          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
