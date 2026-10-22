@@ -26,8 +26,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK einrichten
-        uses: android-actions/setup-android@v3
+      - name: Android SDK vorbereiten
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -name sdkmanager -type f | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Android SDK Manager nicht gefunden!"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
 
       - name: Gradle 8.9 einrichten
         uses: gradle/actions/setup-gradle@v4
@@ -38,25 +52,28 @@ jobs:
         shell: bash
         run: |
           mkdir -p extracted
-          unzip -q Nova-Print-0.1-Quellcode.zip -d extracted
 
-          PROJECT=$(find extracted -type f -name settings.gradle.kts -print -quit)
+          unzip -q Nova-Print-0.1-Quellcode.zip \
+            -d extracted
+
+          PROJECT=$(find extracted -type f \
+            -name settings.gradle.kts -print -quit)
 
           if [ -z "$PROJECT" ]; then
-            echo "FEHLER: Android-Projekt nicht gefunden!"
+            echo "Android-Projekt nicht gefunden!"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT")
-          echo "Projekt gefunden: $PROJECT_DIR"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Projekt gefunden: $PROJECT_DIR"
 
       - name: Android APK bauen
         shell: bash
         run: |
           cd "$PROJECT_DIR"
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug \
+            --no-daemon --stacktrace
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
