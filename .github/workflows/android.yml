@@ -3,7 +3,8 @@ name: Nova-Print APK bauen
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,12 +12,12 @@ permissions:
 
 jobs:
   build:
-    name: Debug-APK erstellen
+    name: Nova-Print Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Repository laden
+      - name: Repository herunterladen
         uses: actions/checkout@v4
 
       - name: Java 17 einrichten
@@ -33,13 +34,34 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Nova-Print Debug-APK bauen
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Projekt-ZIP entpacken
+        shell: bash
+        run: |
+          mkdir -p extracted
+          unzip -q Nova-Print-0.1-Quellcode.zip -d extracted
+
+          PROJECT=$(find extracted -type f -name settings.gradle.kts -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "FEHLER: Android-Projekt nicht gefunden!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT")
+          echo "Projekt gefunden: $PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Android APK bauen
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
         with:
-          name: Nova-Print-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: Nova-Print-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
